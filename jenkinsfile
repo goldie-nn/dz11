@@ -1,0 +1,51 @@
+pipeline {
+  agent {
+    docker {
+      image 'maven:3.9.6-eclipse-temurin-8'
+      args '--privileged --entrypoint=""'
+    }
+  }
+
+  environment {
+    DOCKER_HUB = 'dockerhubcred'
+    DOCKER_FILE = 'dockerfile'
+    REPOSITORY = 'goldienn'
+    IMAGE_NAME = 'javaapp'
+    IMAGE_TAG = "${BUILD_NUMBER}"
+  }
+
+  stages {
+    stage('Checkout & Build Artifact') {
+      steps {
+        git(url: 'https://github.com/boxfuse/boxfuse-sample-java-war-hello.git', branch: 'master')
+        sh 'mvn clean package'
+      }
+    }
+
+    stage('Docker Build & Push (DinD)') {
+      steps {
+        withCredentials([
+          usernamePassword(credentialsId: "${DOCKER_HUB}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS'),
+          file(credentialsId: "${DOCKER_FILE}", variable: 'DOCKERFILE_PATH')
+        ]) {
+          sh """
+            cp "\$DOCKERFILE_PATH" ./Dockerfile
+            dockerd-entrypoint.sh &
+            sleep 5
+            echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+            docker build --tag=${REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG} .
+            docker tag ${REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG} ${REPOSITORY}/${IMAGE_NAME}:latest
+            docker push ${REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}
+            docker push ${REPOSITORY}/${IMAGE_NAME}:latest
+          """
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      cleanWs()
+    }
+  }
+}
